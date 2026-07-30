@@ -1,0 +1,120 @@
+name: update
+
+on:
+  schedule:
+    - cron: "17 3 * * *" # daily, off the hour to avoid load spikes
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  packages: write
+
+# Never run two updates at once: version bump / push / publish would race.
+concurrency:
+  group: update-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      # TODO: pin actions to verified full commit SHAs before enabling
+      # (this workflow holds auth state and package publishing permission)
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://npm.pkg.github.com
+          scope: "@sim1222"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: Restore auth state
+        env:
+          AUTH_JSON: ${{ secrets.AUTH_JSON }}
+        run: |
+          if [ -n "$AUTH_JSON" ]; then
+            umask 077
+            printf '%s' "$AUTH_JSON" > auth.json
+          fi
+
+      - name: Extract
+        id: extract
+        run: |
+          set +e
+          bun run extract
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Notify auth expiry
+        if: steps.extract.outputs.code == '2'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --title "extract: 認証が失効しています" \
+            --body "定期実行の extract が exit code 2 で終了しました。\`bun run login\` で auth.json を再生成し、Secret \`AUTH_JSON\` を更新してください。Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Fail on extraction error
+        if: steps.extract.outputs.code != '0'
+        run: exit 1
+
+      - name: Detect changes
+        id: diff
+        run: |
+          if git diff --quiet -- src/index.ts; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Decide publishing independently of the diff so a previously failed
+      # publish is retried on the next run (repo bumped but npm missing it).
+      - name: Prepare release
+        id: release
+        env:
+          CHANGED: ${{ steps.diff.outputs.changed }}
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$CHANGED" = true ]; then
+            npm version patch --no-git-tag-version
+          fi
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify and build
+        if: steps.release.outputs.publish == 'true'
+        run: bun run check && bun test && bun run build
+
+      - name: Publish
+        if: steps.release.outputs.publish == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: npm publish
+
+      - name: Commit and push
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/index.ts package.json
+          git commit -m "chore: update extracted class names"
+          git push
+
+      - name: Remove auth state
+        if: always()
+        run: rm -f auth.json
