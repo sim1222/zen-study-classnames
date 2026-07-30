@@ -1,6 +1,6 @@
 {
 	"name": "@sim1222/zen-study-classnames",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Auto-generated stable references to ZEN Study's hashed CSS class names",
 	"license": "MIT",
 	"type": "module",
