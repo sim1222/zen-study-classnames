@@ -21,7 +21,7 @@ jobs:
     steps:
       # TODO: pin actions to verified full commit SHAs before enabling
       # (this workflow holds auth state and package publishing permission)
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - uses: oven-sh/setup-bun@v2
         with:
