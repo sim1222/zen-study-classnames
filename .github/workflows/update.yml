@@ -8,6 +8,7 @@ on:
 permissions:
   contents: write
   issues: write
+  id-token: write
 
 # Never run two updates at once: version bump / push / publish would race.
 concurrency:
@@ -19,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # TODO: pin actions to verified full commit SHAs before enabling
-      # (this workflow holds auth state and package publishing permission)
+      # (this workflow holds auth state and OIDC publishing permission)
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - uses: oven-sh/setup-bun@v2
@@ -28,7 +29,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: https://registry.npmjs.org
           scope: "@sim1222"
 
@@ -82,7 +83,6 @@ jobs:
         id: release
         env:
           CHANGED: ${{ steps.diff.outputs.changed }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ "$CHANGED" = true ]; then
             npm version patch --no-git-tag-version
@@ -101,8 +101,6 @@ jobs:
 
       - name: Publish
         if: steps.release.outputs.publish == 'true'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish
 
       - name: Commit and push
