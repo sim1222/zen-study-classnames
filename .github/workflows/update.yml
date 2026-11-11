@@ -60,6 +60,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if ! existing_issues=$(gh api --paginate \
+            'repos/{owner}/{repo}/issues?state=open&per_page=100' \
+            --jq '.[] | select(.pull_request == null and .title == "extract: 認証が失効しています") | .number'); then
+            echo "::error::Failed to list open issues"
+            exit 1
+          fi
+          if [ -n "$existing_issues" ]; then
+            echo "Matching open issue exists; skipping creation."
+            exit 0
+          fi
           gh issue create \
             --title "extract: 認証が失効しています" \
             --body "定期実行の extract が exit code 2 で終了しました。\`bun run login\` で auth.json を再生成し、Secret \`AUTH_JSON\` を更新してください。Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
